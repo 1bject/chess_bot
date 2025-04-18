@@ -65,12 +65,11 @@ chess_piece_sets = [
 layout1 = [["move"]]
 markup1 = ReplyKeyboardMarkup(layout1, one_time_keyboard=False)
 
+boards = {}
+
 def get_path(path):
     return abspath(getsourcefile(lambda:0)).rstrip("chessbot.py")+path
 
-
-def draw_board():
-  pass
 
 async def start(update, context):
     context.move_data = None
@@ -90,7 +89,7 @@ async def messageHandler(update, context):
 async def start_match(update, context):
     await update.message.reply_text('Начинаю игру', reply_markup=markup1)
     await send_board(update, context)
-    
+
 
 async def from_uci(update, context, text):
     global board
@@ -110,10 +109,11 @@ async def make_move(update, context, text):
     move = await from_uci(update, context, text)
     if move:
         board.push(move)
-    await send_board(update, context)
+    caption = await check_game_status(update, context)
+    await send_board(update, context, caption)
 
 
-async def send_board(update, context):
+async def send_board(update, context, capt=None):
     global board
 
     svg_board = chess.svg.board(board=board)
@@ -122,8 +122,27 @@ async def send_board(update, context):
     drawing = svg2rlg("svg_board.svg")
     renderPM.drawToFile(drawing, "png_board.png", fmt="PNG")
 
-    await update.message.reply_photo("png_board.png")
+    await update.message.reply_photo("png_board.png", caption=capt)
 
+
+async def check_game_status(update, context):
+    global board
+    caption = None
+    if board.is_check():
+        caption = "Шах!"
+    if board.is_game_over():
+        if board.is_checkmate():
+            winner = "Чёрные" if chess.Outcome.result == "1-0" else "Белые"
+            caption = f"Победили {winner}"
+        elif board.is_stalemate():
+            caption = "Пат! Ничья!"
+        elif board.is_insufficient_material():
+            caption = "Недостаточно материала! Ничья!"
+        elif board.is_seventyfive_moves():
+            caption = "Ничья по правилу 75-ходов!"
+        elif board.is_fivefold_repetition():
+            caption = "Ничья по троекратному повторению позиции!"
+    return caption
 
 
 def main():
