@@ -75,16 +75,45 @@ chess_piece_sets = [
     "xkcd"
 ]
 
-layout1 = [["move"]]
-markup1 = ReplyKeyboardMarkup(layout1, one_time_keyboard=False)
 
+themes = {"default": {"square light": "#ad8b39",
+                      "square dark": "#e0d5bb",
+                      "square light lastmove": "#904521",
+                      "square dark lastmove": "#e0c7bb"
+},
+          "olives": {"square light": "#75aa2f",
+                     "square dark": "#83b344",
+                     "square light lastmove": "#91bb59",
+                     "square dark lastmove": "#9ec46d"
+}}
 games = {}
 """
 games = {
-chat_id: {"board": chess.Board(), "players": (user1_id, user2_id or None)}
+    chat_id: {
+        "board": chess.Board(),
+        "players": (user1_id, user2_id or None),
+        "theme": {
+            "square light": "HEX",
+            "square dark": "HEX",
+            "square light lastmove": "HEX",
+            "square dark lastmove": "HEX"
+        }
+    }
 }
 """
-
+users = {}
+"""
+users = {
+    user_id: {
+        "theme": {
+            "square light": "HEX",
+            "square dark": "HEX",
+            "square light lastmove": "HEX",
+            "square dark lastmove": "HEX"
+        }
+    }
+}
+"""
 def get_path(path):
     return abspath(getsourcefile(lambda:0)).rstrip("chessbot.py")+path
 
@@ -110,6 +139,37 @@ async def help(update, context):  # WIP
         await update.message.reply_text("invalid move   " + str(e))
         return False"""
 
+
+async def set_theme(update, context):
+    user_id = update.effective_user.id
+    print(list(themes.keys()), context.args[0])
+    if len(context.args) == 1:
+        arg = context.args[0]
+        if arg not in list(themes.keys()):
+            await update.message.reply_text(f"Theme not found")
+            return
+        if user_id in list(users.keys()):
+            users[user_id]["theme"] = themes[arg]
+        else:
+            users[user_id] = {"theme" : themes[arg]}
+        return
+    if len(context.args) != 4:
+        await update.message.reply_text("Invalid amount of arguments\n/set_theme /HEX square_light/,"
+                                        " /HEX square_dark/, /HEX square_light_lastmove/, /HEX square_dark_lastmove/")
+        return
+    square_light, square_dark, square_light_lastmove, square_dark_lastmove = context.args
+    if user_id in list(users.keys()):
+        users[user_id]["theme"] = {"square light": square_light,
+                                   "square dark": square_dark,
+                                   "square light lastmove": square_light_lastmove,
+                                   "square dark lastmove": square_dark_lastmove}
+    else:
+        users[user_id] = {"theme": {"square light": square_light,
+                                   "square dark": square_dark,
+                                   "square light lastmove": square_light_lastmove,
+                                   "square dark lastmove": square_dark_lastmove}}
+
+
 async def do_move(update, context, text):
     try:
         chat = update.effective_chat
@@ -119,6 +179,7 @@ async def do_move(update, context, text):
         await send_board(update, context)
     except Exception as e:
         await update.message.reply_text("Invalid move!" + str(e))
+
 
 async def message_handler(update, context):
     chat = update.effective_chat
@@ -151,6 +212,7 @@ async def message_handler(update, context):
         
         await do_move(update, context, message)
 
+
 async def start_game(update, context):
     chat = update.effective_chat
     user = update.effective_user
@@ -159,9 +221,14 @@ async def start_game(update, context):
         games[chat.id] = {
             "board": chess.Board(),
             "players": (user.id, None),
+            "theme": themes["default"]
         }
+        if user.id in list(users.keys()):
+            users[user.id]["themes"] = themes["default"]
+        else:
+            users[user.id] = {"theme": themes["default"]}
         await send_board(update, context, "Начинаю игру, 2 игрока на одном устройстве.")
-    else: # chat.type = "group"
+    else:  # chat.type = "group"
         inline_keyboard = [[InlineKeyboardButton("Присоединиться за белых", callback_data="join_white")],
                            [InlineKeyboardButton("Присоединиться за чёрных", callback_data="join_black")]]
         await update.message.reply_text("Начинаю игру, ожидаю 2 игрков.",
@@ -169,8 +236,10 @@ async def start_game(update, context):
         games[chat.id] = {
             "board": chess.Board(),
             "players": (None, None),
-            "message_id": update.message.message_id
+            "message_id": update.message.message_id,
+            "theme": themes["default"]
         }
+
 
 async def handle_join(update, context):
     query = update.callback_query
@@ -178,8 +247,6 @@ async def handle_join(update, context):
 
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    user = query.from_user
-    user_name = user.username
 
     if chat_id not in games:
         await query.answer("Игра не найдена.")
@@ -193,11 +260,13 @@ async def handle_join(update, context):
         game["players"] = (user_id, black)
         user = await context.bot.get_chat_member(chat_id, game['players'][0])
         user_name = user.user.username or user.user.name
+        users[context.effective_user.id] = {"theme": themes["default"]}
         await context.bot.send_message(chat_id, f"{user_name} присоединился за белых.")
     elif "join_black" in query.data and black is None:
         game["players"] = (white, user_id)
         user = await context.bot.get_chat_member(chat_id, game['players'][1])
         user_name = user.user.username or user.user.name
+        users[context.effective_user.id] = {"theme": themes["default"]}
         await context.bot.send_message(chat_id, f"{user_name} присоединился за чёрных.")
     else:
         await query.answer("сторона занята.")
@@ -211,7 +280,7 @@ async def handle_join(update, context):
         black_name = black.user.username or black.user.name
         try:
             await query.message.delete()
-        except:
+        except Exception as e:
             pass
         response = f"Игра началась!\n {white_name} играет за белых\n {black_name} играет за чёрных"
         await send_board(update, context)
@@ -224,8 +293,10 @@ async def handle_join(update, context):
         # Fallback if message can't be edited
         await context.bot.send_message(chat_id, response)
 
+
 async def send_board(update, context, capt=None):
     chat = update.effective_chat
+    user = update.effective_user
 
     if chat.id not in games:
         await update.message.reply_text("Игра не найдена.")
@@ -233,7 +304,9 @@ async def send_board(update, context, capt=None):
 
     board = games[chat.id]["board"]
 
-    svg_board = chess.svg.board(board=board)
+    last_move = board.peek() if board.move_stack else None
+
+    svg_board = chess.svg.board(board=board, colors=users[user.id]["theme"], lastmove=last_move)
     with open("svg_board.svg", "w") as f:
         f.write(svg_board)
     drawing = svg2rlg("svg_board.svg")
@@ -272,6 +345,7 @@ def main():
     application.add_handler(CommandHandler(["start", "help"], start))
     application.add_handler(CommandHandler("start_game", start_game))
     application.add_handler(CommandHandler("create_game", start_game))
+    application.add_handler(CommandHandler("set_theme", set_theme))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     application.add_handler(CallbackQueryHandler(handle_join))
 
