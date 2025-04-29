@@ -10,16 +10,16 @@ from os.path import abspath
 from telegram.ext import (
     Application,
     CommandHandler,
-    Updater, 
-    MessageHandler, 
-    filters, 
+    Updater,
+    MessageHandler,
+    filters,
     ContextTypes,
     CallbackQueryHandler)
-from telegram import (ReplyKeyboardMarkup, 
-                      ReplyKeyboardRemove, 
-                      KeyboardButton, 
-                      Bot, 
-                      InputFile, 
+from telegram import (ReplyKeyboardMarkup,
+                      ReplyKeyboardRemove,
+                      KeyboardButton,
+                      Bot,
+                      InputMediaPhoto,
                       InlineKeyboardButton,
                       InlineKeyboardMarkup)
 from random import randint
@@ -75,17 +75,17 @@ chess_piece_sets = [
     "xkcd"
 ]
 
-
 themes = {"default": {"square light": "#ad8b39",
                       "square dark": "#e0d5bb",
                       "square light lastmove": "#904521",
                       "square dark lastmove": "#e0c7bb"
-},
+                      },
           "olives": {"square light": "#75aa2f",
                      "square dark": "#83b344",
                      "square light lastmove": "#91bb59",
                      "square dark lastmove": "#9ec46d"
-}}
+                     }
+          }
 games = {}
 """
 games = {
@@ -93,11 +93,12 @@ games = {
         "board": chess.Board(),
         "players": (user1_id, user2_id or None),
         "theme": {
-            "square light": "HEX",
-            "square dark": "HEX",
-            "square light lastmove": "HEX",
-            "square dark lastmove": "HEX"
-        }
+            "square light": HEX,
+            "square dark": HEX,
+            "square light lastmove": HEX,
+            "square dark lastmove": HEX
+        },
+        "message": Message()
     }
 }
 """
@@ -106,16 +107,19 @@ users = {}
 users = {
     user_id: {
         "theme": {
-            "square light": "HEX",
-            "square dark": "HEX",
-            "square light lastmove": "HEX",
-            "square dark lastmove": "HEX"
+            "square light": HEX,
+            "square dark": HEX,
+            "square light lastmove": HEX,
+            "square dark lastmove": HEX
         }
+        "piece": "merida"
     }
 }
 """
+
+
 def get_path(path):
-    return abspath(getsourcefile(lambda:0)).rstrip("chessbot.py")+path
+    return abspath(getsourcefile(lambda: 0)).rstrip("chessbot.py") + path
 
 
 async def start(update, context):
@@ -125,6 +129,7 @@ async def start(update, context):
 
 async def help(update, context):  # WIP
     await update.message.reply_text('WIP')
+
 
 """async def from_uci(update, context, text):
     global board
@@ -142,7 +147,6 @@ async def help(update, context):  # WIP
 
 async def set_theme(update, context):
     user_id = update.effective_user.id
-    print(list(themes.keys()), context.args[0])
     if len(context.args) == 1:
         arg = context.args[0]
         if arg not in list(themes.keys()):
@@ -151,7 +155,8 @@ async def set_theme(update, context):
         if user_id in list(users.keys()):
             users[user_id]["theme"] = themes[arg]
         else:
-            users[user_id] = {"theme" : themes[arg]}
+            users[user_id] = {"theme": themes[arg]}
+        await send_board(update, context)
         return
     if len(context.args) != 4:
         await update.message.reply_text("Invalid amount of arguments\n/set_theme /HEX square_light/,"
@@ -165,9 +170,10 @@ async def set_theme(update, context):
                                    "square dark lastmove": square_dark_lastmove}
     else:
         users[user_id] = {"theme": {"square light": square_light,
-                                   "square dark": square_dark,
-                                   "square light lastmove": square_light_lastmove,
-                                   "square dark lastmove": square_dark_lastmove}}
+                                    "square dark": square_dark,
+                                    "square light lastmove": square_light_lastmove,
+                                    "square dark lastmove": square_dark_lastmove}}
+    await send_board(update, context)
 
 
 async def do_move(update, context, text):
@@ -176,7 +182,8 @@ async def do_move(update, context, text):
         board = games[chat.id]["board"]
         move = board.parse_uci(text.lower())
         board.push(move)
-        await send_board(update, context)
+        caption = await check_game_status(update, context, board)
+        await send_board(update, context, caption)
     except Exception as e:
         await update.message.reply_text("Invalid move!" + str(e))
 
@@ -189,27 +196,24 @@ async def message_handler(update, context):
     if chat.id not in games:
         await update.message.reply_text("Начните игру с помощью /start_game")
         return
-    
+
     game = games[chat.id]
     board = game["board"]
 
-    if board.is_game_over():
-        await update.message.reply_text("Игра закончилась! Начните новую с помощью /start_game")
-        return
-    
     if chat.type == "private":
         await do_move(update, context, message)
     else:
         white, black = game["players"]
         current_color, current_player = ("белых", white) if board.turn == chess.WHITE else ("чёрных", black)
-        cur_user_name = await (context.bot.get_chat_member(chat.id, game['players'][0]) if current_color == "белых" 
+        cur_user_name = await (context.bot.get_chat_member(chat.id, game['players'][0]) if current_color == "белых"
                                else context.bot.get_chat_member(chat.id, game['players'][0]))
-        
+
         cur_user_name = cur_user_name.user.username or cur_user_name.user.name
         if user.id != current_player:
-            await update.message.reply_text(f"Сейчас не ваш ход! Сейчас ходит @{cur_user_name}, играющий за {current_color}")
+            await update.message.reply_text(
+                f"Сейчас не ваш ход! Сейчас ходит @{cur_user_name}, играющий за {current_color}")
             return
-        
+
         await do_move(update, context, message)
 
 
@@ -221,7 +225,8 @@ async def start_game(update, context):
         games[chat.id] = {
             "board": chess.Board(),
             "players": (user.id, None),
-            "theme": themes["default"]
+            "theme": themes["default"],
+            "message": None
         }
         if user.id in list(users.keys()):
             users[user.id]["themes"] = themes["default"]
@@ -251,7 +256,7 @@ async def handle_join(update, context):
     if chat_id not in games:
         await query.answer("Игра не найдена.")
         return
-    
+
     game = games[chat_id]
 
     white, black = game["players"]
@@ -271,11 +276,11 @@ async def handle_join(update, context):
     else:
         await query.answer("сторона занята.")
         return
-    
+
     if None not in game["players"]:
         white = await context.bot.get_chat_member(chat_id, game['players'][0])
         black = await context.bot.get_chat_member(chat_id, game['players'][1])
-        
+
         white_name = white.user.username or white.user.name
         black_name = black.user.username or black.user.name
         try:
@@ -286,7 +291,7 @@ async def handle_join(update, context):
         await send_board(update, context)
 
     try:
-        await query.edit_message_text(response, 
+        await query.edit_message_text(response,
                                       chat_id=chat_id,
                                       message_id=game["message_id"])
     except Exception as e:
@@ -315,19 +320,25 @@ async def send_board(update, context, capt=None):
     png_bytes.seek(0)
 
     if update.message:
-        await update.message.reply_photo(photo=png_bytes, caption=capt)
+        if games[chat.id]["message"]:
+            await bot.delete_message(chat_id=chat.id, message_id=update.message.id)
+            await bot.delete_message(chat_id=chat.id, message_id=games[chat.id]["message"].id)
+            games[chat.id]["message"] = await update.message.reply_photo(png_bytes)
+        else:
+            games[chat.id]["message"] = update.message
+            await update.message.reply_photo(photo=png_bytes, caption=capt)
     else:
         await context.bot.send_photo(photo=png_bytes, chat_id=chat.id, caption=capt)
 
 
-async def check_game_status(update, context):
-    global board
+async def check_game_status(update, context, board):
     caption = None
+    outcome = board.outcome()
     if board.is_check():
         caption = "Шах!"
     if board.is_game_over():
         if board.is_checkmate():
-            winner = "Чёрные" if chess.Outcome.result == "1-0" else "Белые"
+            winner = "Чёрные" if outcome.winner == chess.BLACK else "Белые"
             caption = f"Победили {winner}"
         elif board.is_stalemate():
             caption = "Пат! Ничья!"
@@ -336,7 +347,8 @@ async def check_game_status(update, context):
         elif board.is_seventyfive_moves():
             caption = "Ничья по правилу 75-ходов!"
         elif board.is_fivefold_repetition():
-            caption = "Ничья по троекратному повторению позиции!"
+            caption = "Ничья по пятикратному повторению позиции!"
+        caption += "\nИгра закончилась! Начните новую с помощью /start_game"
     return caption
 
 
@@ -353,17 +365,18 @@ def main():
 
 
 if __name__ == '__main__':
-    board = chess.Board()
-    
+    # board = chess.Board()
+
     pygame.init()
     size = (256, 256)
     surface = pygame.Surface(size)
     surface.fill((255, 255, 255))
     pygame.image.save(surface, get_path("data/test.png"))
-    piece_id = [["wB", "wK", "wN", "wP", "wQ", "wR"],     # piece_id[0][...] -> white piece
-                ["bB", "bK", "bN", "bP", "bQ", "bR"]]    # piece_id[1][...] -> black piece
-                                                        # ORDER -  Bishop, King, Knight, Pawn, Queen, Rook
+    piece_id = [["wB", "wK", "wN", "wP", "wQ", "wR"],  # piece_id[0][...] -> white piece
+                ["bB", "bK", "bN", "bP", "bQ", "bR"]]  # piece_id[1][...] -> black piece
+    # ORDER -  Bishop, King, Knight, Pawn, Queen, Rook
     piece_png = [list(map(lambda x: x + ".png", piece_id[0])), list(map(lambda x: x + ".png", piece_id[1]))]
-    piece_set = "merida" # piece picture set
-    piece_path = [list(map(lambda x: get_path(f"data/pieces/{piece_set}/{x}"), piece_png[0])), list(map(lambda x: get_path(f"data/pieces/{piece_set}/{x}"), piece_png[1]))]
+    piece_set = "merida"  # piece picture set
+    piece_path = [list(map(lambda x: get_path(f"data/pieces/{piece_set}/{x}"), piece_png[0])),
+                  list(map(lambda x: get_path(f"data/pieces/{piece_set}/{x}"), piece_png[1]))]
     main()
